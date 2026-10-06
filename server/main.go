@@ -18,8 +18,11 @@ func main() {
 	http.HandleFunc("/publish/{topic}/{message}", handlePublish(broker))
 	http.HandleFunc("/messages/{topic}/{subscriberId}", handleGetMessages(broker))
 
-
-	http.ListenAndServe(":8080", nil)
+	fmt.Println("Starting server at port 8080")
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		fmt.Println("Error starting server:", err)
+	}
 }
 
 func handleSubscribe(broker *redsBroker.Broker) http.HandlerFunc {
@@ -109,15 +112,57 @@ func handleGetMessages(broker *redsBroker.Broker) http.HandlerFunc {
 			return
 		}
 
-		messages, err := broker.GetSubscriberMessagesForTopic(topic, subscriberId)
+		queue, ch, err := broker.GetSubscriberMessagesForTopic(topic, subscriberId)
 		if err != nil {
 			slog.Error("ERROR:handleGetMessages:"+err.Error())
 			errorHandler(w, err)
 			return
 		}
 
-		
-		_, err = w.Write([]byte(strings.Join(messages, ", ")))
+		notifySubscribers(w, r, queue, ch)
+	}
+}
+
+func notifySubscribers(
+	w http.ResponseWriter, 
+	r *http.Request, 
+	queue []string,
+	ch *chan string,
+) {
+	clientDisconnection := r.Context().Done()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	rc := http.NewResponseController(w)
+
+	if len(queue) > 0 {
+		fmt.Fprintf(w, "data: %s\n\n", strings.Join(queue, ", "))
+
+		err := rc.Flush()
+		if err != nil {
+			fmt.Println("Error flushing data: ", err)
+			return
+		}
+	}
+
+	for {
+		select {
+		case <-clientDisconnection:
+			fmt.Println("Client Disconnected")
+			redsBroker.DiconnectChannel(ch)
+			return
+		case message := <-*ch:
+
+			fmt.Fprintf(w, "data: %s\n\n", message)
+
+			err := rc.Flush()
+			if err != nil {
+				fmt.Println("Error flushing data: ", err)
+				return
+			}
+		}
 	}
 }
 

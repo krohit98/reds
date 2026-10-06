@@ -11,15 +11,16 @@ import (
 )
 
 var httpClient *http.Client
+var sseClient *http.Client
 var baseURL string = "http://localhost:8080"
 
 func main() {
 
-	if httpClient == nil {
-		httpClient = &http.Client {
-			Timeout: 10 * time.Second,
-		}
+	httpClient = &http.Client {
+		Timeout: 10 * time.Second,
 	}
+
+	sseClient = &http.Client{}
 
 	fmt.Println("Welcome to REDS")
 	fmt.Println("Type a command to get started")
@@ -162,11 +163,7 @@ func handleGetMessages(inputArray []string) {
 
 	url := fmt.Sprintf("%v/messages/%v/%v", baseURL, topic, subscriberId)
 
-	response := request(http.MethodGet, url)
-
-	if response != "" {
-		fmt.Println(response)
-	}
+	sseRequest(http.MethodGet, url)
 }
 
 func request(method string, url string) string {
@@ -195,6 +192,33 @@ func request(method string, url string) string {
 	}
 
 	return string(responseBody)
+}
+
+func sseRequest(method string, url string) {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		fmt.Printf("Error: Cannot create request: %v", err)
+		return
+	}
+
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		fmt.Printf("Error: Cannot fetch response: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	scanner := bufio.NewScanner(resp.Body)
+
+	for scanner.Scan() {
+		respBody := scanner.Text()
+		fmt.Println(respBody)
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		fmt.Printf("Error: Cannot read streamed events: %v", err)
+	}
 }
 
 func logHelp() {

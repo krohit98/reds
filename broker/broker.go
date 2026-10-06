@@ -18,6 +18,7 @@ var (
 type Subscriber struct {
 	Id string
 	queue []string
+	ch chan string
 }
 
 type Broker struct {
@@ -46,6 +47,7 @@ func (b *Broker) Subscribe(topic string) (*Subscriber, error) {
 	subscriber := Subscriber {
 		Id: GenerateRandomId(),
 		queue: make([]string, 0),
+		ch: nil,
 	}
 
 	b.topics[topic] = append(b.topics[topic], &subscriber)
@@ -110,40 +112,51 @@ func (b *Broker) Publish(topic string, message string) error {
 		return ErrNoSubscribers
 	}
 
-	for _,v := range subscribers {
-		v.queue = append(v.queue, message)
+	for _,subscriber := range subscribers {
+		if subscriber.ch != nil {
+			subscriber.ch <- message
+		} else {
+			subscriber.queue = append(subscriber.queue, message)
+		}
 	}
 
 	return nil
 }
 
-func (b *Broker) GetSubscriberMessagesForTopic(topic string, subscriberId string) ([]string, error) {
+func (b *Broker) GetSubscriberMessagesForTopic(topic string, subscriberId string) ([]string, *chan string, error) {
 	if len(topic) == 0 {
-		return nil, ErrInvalidTopic
+		return nil, nil, ErrInvalidTopic
 	}
 
 	if len(subscriberId) == 0 {
-		return nil, ErrInvalidSubscriberId
+		return nil, nil, ErrInvalidSubscriberId
 	}
 
 	subscribers, ok := b.topics[topic]
 
 	if(!ok) {
-		return nil, ErrTopicNotFound
+		return nil, nil, ErrTopicNotFound
 	}
 
 	if len(subscribers) <= 0 {
-		return nil, ErrNoSubscribers
+		return nil, nil, ErrNoSubscribers
 	}
 
 
-	for _,v := range subscribers {
-		if v.Id == subscriberId {
-			return v.queue, nil
+	for _,subscriber := range subscribers {
+		if subscriber.Id == subscriberId {
+			subscriber.ch = make(chan string)
+			messageArray := subscriber.queue
+			subscriber.queue = subscriber.queue[:0]
+			return messageArray, &subscriber.ch, nil
 		}
 	}
 
-	return nil, ErrSubscriberIdNotFound
+	return nil, nil, ErrSubscriberIdNotFound
+}
+
+func DiconnectChannel(ch *chan string) {
+	*ch = nil
 }
 
 func GenerateRandomId() string {
